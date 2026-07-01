@@ -1,0 +1,102 @@
+load("@aspect_rules_py//py:defs.bzl", "py_library")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_python//python:packaging.bzl", "py_wheel")
+load("@tar.bzl", "mutate", "tar")
+
+package(default_visibility = ["//visibility:public"])
+
+# rules/sonic-platform-common.mk pins version 1.0 (setup.py `version`).
+VERSION = "1.0"
+
+# setup.py declares 50+ subpackages under these 9 top-level package roots.
+# The recursive globs pick up every declared subpackage automatically.
+# Note: son624 additionally has "sonic_fwmgr" — that's son624 downstream
+# fork's addition; son629 upstream setup.py doesn't include it.
+_PACKAGE_GLOBS = [
+    "sonic_eeprom/**/*.py",
+    "sonic_led/**/*.py",
+    "sonic_fan/**/*.py",
+    "sonic_platform_base/**/*.py",
+    "sonic_psu/**/*.py",
+    "sonic_sfp/**/*.py",
+    "sonic_thermal/**/*.py",
+    "sonic_y_cable/**/*.py",
+]
+
+py_library(
+    name = "sources",
+    srcs = glob(_PACKAGE_GLOBS),
+    imports = ["."],
+    visibility = ["//visibility:public"],
+)
+
+# bdist_wheel emits top_level.txt listing the top-level import names.
+write_file(
+    name = "top_level_txt",
+    out = "top_level.txt",
+    content = [
+        "sonic_eeprom",
+        "sonic_fan",
+        "sonic_led",
+        "sonic_platform_base",
+        "sonic_psu",
+        "sonic_sfp",
+        "sonic_thermal",
+        "sonic_y_cable",
+        "",
+    ],
+)
+
+# Wheel artifact: sonic_platform_common-1.0-py3-none-any.whl
+py_wheel(
+    name = "wheel",
+    distribution = "sonic-platform-common",
+    version = VERSION,
+    # setup.py metadata — align with Make wheel METADATA.
+    author = "SONiC Team",
+    author_email = "linuxnetdev@microsoft.com",
+    summary = "Platform-specific peripheral hardware interface APIs for SONiC",
+    homepage = "https://github.com/Azure/sonic-platform-common",
+    license = "Apache 2.0",
+    classifiers = [
+        "Development Status :: 3 - Alpha",
+        "Environment :: Plugins",
+        "Intended Audience :: Developers",
+        "Intended Audience :: Information Technology",
+        "Intended Audience :: System Administrators",
+        "License :: OSI Approved :: Apache Software License",
+        "Natural Language :: English",
+        "Operating System :: POSIX :: Linux",
+        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3.7",
+        "Topic :: Utilities",
+    ],
+    # setup.py install_requires: natsort, PyYAML, redis, sonic-py-common,
+    # sonic-config-engine (sonic_dependencies).
+    requires = [
+        "natsort",
+        "PyYAML",
+        "redis",
+        "sonic-py-common",
+        "sonic-config-engine",
+    ],
+    extra_distinfo_files = {
+        "LICENSE": "LICENSE",
+        ":top_level_txt": "top_level.txt",
+    },
+    deps = [":sources"],
+    visibility = ["//visibility:public"],
+)
+
+# Install tar layer (OCI image consumer). setup.py declares only `packages=[...]`
+# (no scripts, no data_files), so a single mutate covers all files at
+# /usr/lib/python3/dist-packages/<pkg>/...
+tar(
+    name = "install",
+    srcs = glob(_PACKAGE_GLOBS),
+    mutate = mutate(
+        package_dir = "/usr/lib/python3/dist-packages",
+        strip_prefix = package_name(),
+    ),
+    visibility = ["//visibility:public"],
+)
